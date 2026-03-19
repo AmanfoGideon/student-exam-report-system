@@ -1,0 +1,256 @@
+<?php
+session_start();
+require_once __DIR__ . '/../../includes/db.php';
+
+
+// Auth: Admin only
+if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'Admin') {
+    header('Location: ../../login.php?error=Please+login+as+Admin');
+    exit;
+}
+
+// Fetch current school info
+$school = $conn->query("SELECT * FROM schools LIMIT 1")->fetch_assoc() ?? [];
+
+// Fetch current system settings
+$settings = [];
+$rs = $conn->query("SELECT * FROM system_settings");
+while ($r = $rs->fetch_assoc()) $settings[$r['setting_key']] = $r['setting_value'];
+
+// Fetch academic years
+$years = [];
+$rs = $conn->query("SELECT * FROM academic_years ORDER BY year_label DESC");
+while ($r = $rs->fetch_assoc()) $years[] = $r;
+
+// Fetch grading scale
+$grading = [];
+$rs = $conn->query("SELECT * FROM grading_scale ORDER BY rank_order");
+while ($r = $rs->fetch_assoc()) $grading[] = $r;
+
+// Handle Add Academic Year
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_academic_year'])) {
+    $year_label = $conn->real_escape_string($_POST['year_label']);
+    $start_date = $_POST['start_date'] ?: null;
+    $end_date = $_POST['end_date'] ?: null;
+    $set_active = isset($_POST['set_active']) ? 1 : 0;
+
+    if ($set_active) {
+        $conn->query("UPDATE academic_years SET is_active=0");
+    }
+
+    $stmt = $conn->prepare("INSERT INTO academic_years (year_label, start_date, end_date, is_active) VALUES (?,?,?,?)");
+    $stmt->bind_param("sssi", $year_label, $start_date, $end_date, $set_active);
+    $stmt->execute();
+
+    // Also update default academic year in system_settings
+    $conn->query("INSERT INTO system_settings (setting_key, setting_value) VALUES ('default_academic_year','$year_label')
+        ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
+
+    header("Location: settings.php?success=1");
+    exit;
+}
+
+// Handle settings form submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['add_academic_year'])) {
+    // --- SCHOOL INFO ---
+    $school_name = $conn->real_escape_string($_POST['school_name'] ?? '');
+    $school_motto = $conn->real_escape_string($_POST['school_motto'] ?? '');
+    $school_phone = $conn->real_escape_string($_POST['school_phone'] ?? '');
+    $school_email = $conn->real_escape_string($_POST['school_email'] ?? '');
+    $school_address = $conn->real_escape_string($_POST['school_address'] ?? '');
+    
+    // Handle uploads
+    $uploadDir = __DIR__ . '/uploads/';
+    if (!file_exists($uploadDir)) mkdir($uploadDir, 0755, true);
+
+    $logo_path = $school['logo_path'] ?? '';
+    if (isset($_FILES['school_logo']) && $_FILES['school_logo']['error'] === UPLOAD_ERR_OK) {
+        $fileName = 'logo_' . time() . '_' . basename($_FILES['school_logo']['name']);
+        move_uploaded_file($_FILES['school_logo']['tmp_name'], $uploadDir . $fileName);
+        $logo_path = 'uploads/' . $fileName;
+    }
+
+    $stamp_path = $settings['school_stamp'] ?? '';
+    if (isset($_FILES['school_stamp']) && $_FILES['school_stamp']['error'] === UPLOAD_ERR_OK) {
+        $fileName = 'stamp_' . time() . '_' . basename($_FILES['school_stamp']['name']);
+        move_uploaded_file($_FILES['school_stamp']['tmp_name'], $uploadDir . $fileName);
+        $stamp_path = 'uploads/' . $fileName;
+    }
+
+    $signature_path = $settings['headteacher_signature'] ?? '';
+    if (isset($_FILES['headteacher_signature']) && $_FILES['headteacher_signature']['error'] === UPLOAD_ERR_OK) {
+        $fileName = 'signature_' . time() . '_' . basename($_FILES['headteacher_signature']['name']);
+        move_uploaded_file($_FILES['headteacher_signature']['tmp_name'], $uploadDir . $fileName);
+        $signature_path = 'uploads/' . $fileName;
+    }
+
+    // Update or insert school info
+    if ($school) {
+        $conn->query("UPDATE schools SET name='$school_name', address='$school_address', phone='$school_phone', email='$school_email', logo_path='$logo_path', theme='" . ($_POST['theme'] ?? 'deep-blue-white') . "' WHERE id=" . $school['id']);
+    } else {
+        $conn->query("INSERT INTO schools (name,address,phone,email,logo_path,theme) VALUES ('$school_name','$school_address','$school_phone','$school_email','$logo_path','" . ($_POST['theme'] ?? 'deep-blue-white') . "')");
+    }
+
+    // --- SYSTEM SETTINGS ---
+    $conn->query("INSERT INTO system_settings (setting_key, setting_value) VALUES 
+        ('school_motto','" . $school_motto . "'),
+        ('school_stamp','" . $stamp_path . "'),
+        ('headteacher_signature','" . $signature_path . "'),
+        ('default_academic_year','" . ($_POST['default_academic_year'] ?? '') . "')
+        ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
+
+    // --- GRADING SCALE ---
+    $grade_ids = $_POST['grade_id'] ?? [];
+    $grade_labels = $_POST['grade_label'] ?? [];
+    $min_scores = $_POST['min_score'] ?? [];
+    $max_scores = $_POST['max_score'] ?? [];
+    $remarks = $_POST['remark'] ?? [];
+    $rank_orders = $_POST['rank_order'] ?? [];
+
+    foreach ($grade_labels as $i => $g) {
+        $gid = (int)($grade_ids[$i] ?? 0);
+        $g = $conn->real_escape_string($g);
+        $min = (int)($min_scores[$i] ?? 0);
+        $max = (int)($max_scores[$i] ?? 0);
+        $rmk = $conn->real_escape_string($remarks[$i] ?? '');
+        $rank = (int)($rank_orders[$i] ?? 1);
+
+        if ($gid > 0) {
+            $conn->query("UPDATE grading_scale SET grade='$g', min_score=$min, max_score=$max, remark='$rmk', rank_order=$rank WHERE id=$gid");
+        } else {
+            $conn->query("INSERT INTO grading_scale (grade,min_score,max_score,remark,rank_order) VALUES ('$g',$min,$max,'$rmk',$rank)");
+        }
+    }
+
+   // header("Location: settings.php?success=1");
+    exit;
+}
+?>
+
+<!doctype html>
+<html lang="en">
+<head>
+    <?php include __DIR__.'/../../pwa-head.php'; ?>
+
+  <meta charset="utf-8">
+  <title>Settings | FOASE M/A JHS</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" type="image/png" href="../../favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="../../favicon.svg" />
+  <link rel="shortcut icon" href="../../favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png" />
+  <link rel="manifest" href="../../site.webmanifest" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+ 
+  <!-- add your external CSS here -->
+</head>
+<body>
+   <?php require_once __DIR__ . '/../partials/header_stub.php'; ?>
+<div class="container-fluid p-4">
+    <h3>System Settings</h3>
+    <?php if(isset($_GET['success'])): ?>
+        <div class="alert alert-success">Settings updated successfully!</div>
+    <?php endif; ?>
+
+    <!-- Add Academic Year -->
+    <h5>Add Academic Year</h5>
+    <form method="post" class="row g-2 mb-3 align-items-center">
+        <div class="col-md-2">
+            <input type="text" name="year_label" class="form-control" placeholder="2025/2026" required>
+        </div>
+        <div class="col-md-3">
+            <input type="date" name="start_date" class="form-control" placeholder="Start Date">
+        </div>
+        <div class="col-md-3">
+            <input type="date" name="end_date" class="form-control" placeholder="End Date">
+        </div>
+        <div class="col-md-2 form-check">
+            <input type="checkbox" name="set_active" class="form-check-input" id="set_active">
+            <label for="set_active" class="form-check-label">Set as Active</label>
+        </div>
+        <div class="col-md-2">
+            <button type="submit" name="add_academic_year" class="btn btn-success w-100">Add Year</button>
+        </div>
+    </form>
+
+    <!-- School & System Info -->
+    <form method="post" enctype="multipart/form-data">
+        <h5>School Info</h5>
+        <div class="row g-3">
+            <div class="col-md-4"><label>School Name</label><input type="text" name="school_name" class="form-control" value="<?= htmlspecialchars($school['name'] ?? '') ?>"></div>
+            <div class="col-md-4"><label>Motto</label><input type="text" name="school_motto" class="form-control" value="<?= htmlspecialchars($settings['school_motto'] ?? '') ?>"></div>
+            <div class="col-md-4"><label>Phone</label><input type="text" name="school_phone" class="form-control" value="<?= htmlspecialchars($school['phone'] ?? '') ?>"></div>
+            <div class="col-md-4"><label>Email</label><input type="email" name="school_email" class="form-control" value="<?= htmlspecialchars($school['email'] ?? '') ?>"></div>
+            <div class="col-md-4"><label>Address</label><input type="text" name="school_address" class="form-control" value="<?= htmlspecialchars($school['address'] ?? '') ?>"></div>
+            <div class="col-md-4"><label>Logo</label><input type="file" name="school_logo" class="form-control"><small>Current: <?= htmlspecialchars($school['logo_path'] ?? '') ?></small></div>
+            <div class="col-md-4"><label>Stamp</label><input type="file" name="school_stamp" class="form-control"><small>Current: <?= htmlspecialchars($settings['school_stamp'] ?? '') ?></small></div>
+            <div class="col-md-4"><label>Headteacher Signature</label><input type="file" name="headteacher_signature" class="form-control"><small>Current: <?= htmlspecialchars($settings['headteacher_signature'] ?? '') ?></small></div>
+            <div class="col-md-4"><label>Theme</label>
+                <select name="theme" class="form-select">
+                    <option value="deep-blue-white" <?= ($school['theme']??'')=='deep-blue-white'?'selected':'' ?>>Deep Blue & White</option>
+                    <option value="light-theme" <?= ($school['theme']??'')=='light-theme'?'selected':'' ?>>Light Theme</option>
+                </select>
+            </div>
+            <div class="col-md-4"><label>Default Academic Year</label>
+                <input type="text" name="default_academic_year" class="form-control" value="<?= htmlspecialchars($settings['default_academic_year'] ?? '') ?>">
+            </div>
+        </div>
+
+        <!-- Grading Scale -->
+        <h5 class="mt-4">Grading Scale</h5>
+        <div class="table-responsive">
+            <table class="table table-bordered" id="gradingTable">
+                <thead>
+                    <tr>
+                        <th>Grade</th><th>Min Score</th><th>Max Score</th><th>Remark</th><th>Rank Order</th><th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach($grading as $g): ?>
+                    <tr>
+                        <td><input type="text" name="grade_label[]" class="form-control" value="<?= $g['grade'] ?>"></td>
+                        <td><input type="number" name="min_score[]" class="form-control" value="<?= $g['min_score'] ?>"></td>
+                        <td><input type="number" name="max_score[]" class="form-control" value="<?= $g['max_score'] ?>"></td>
+                        <td><input type="text" name="remark[]" class="form-control" value="<?= htmlspecialchars($g['remark']) ?>"></td>
+                        <td><input type="number" name="rank_order[]" class="form-control" value="<?= $g['rank_order'] ?>"></td>
+                        <td><button type="button" class="btn btn-danger btn-sm removeRow">Remove</button></td>
+                        <input type="hidden" name="grade_id[]" value="<?= $g['id'] ?>">
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            <button type="button" class="btn btn-success btn-sm" id="addGradeRow">Add Grade</button>
+        </div>
+
+        <div class="mt-3"><button type="submit" class="btn btn-primary">Save Settings</button></div>
+    </form>
+</div>
+
+<script>
+document.getElementById('addGradeRow').addEventListener('click', function(){
+    let tbody = document.querySelector('#gradingTable tbody');
+    let row = document.createElement('tr');
+    row.innerHTML = `
+        <td><input type="text" name="grade_label[]" class="form-control" placeholder="Grade"></td>
+        <td><input type="number" name="min_score[]" class="form-control"></td>
+        <td><input type="number" name="max_score[]" class="form-control"></td>
+        <td><input type="text" name="remark[]" class="form-control"></td>
+        <td><input type="number" name="rank_order[]" class="form-control"></td>
+        <td><button type="button" class="btn btn-danger btn-sm removeRow">Remove</button></td>
+        <input type="hidden" name="grade_id[]" value="0">
+    `;
+    tbody.appendChild(row);
+});
+
+document.querySelector('#gradingTable').addEventListener('click', function(e){
+    if(e.target.classList.contains('removeRow')){
+        e.target.closest('tr').remove();
+    }
+});
+</script>
+
+<?php include __DIR__ . '/../partials/footer_stub.php'; ?>
+
+<?php include __DIR__.'/../../pwa-footer.php'; ?>\n</body>
+</html>

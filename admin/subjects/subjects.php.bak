@@ -1,0 +1,261 @@
+<?php
+session_start();
+require_once __DIR__ . '/../../includes/db.php';
+
+// Ensure logged in
+if (!isset($_SESSION['user_id'])) {
+  header('Location: ../../auth/login.php');
+  exit;
+}
+
+// Fetch classes
+$classes = [];
+$res = $conn->query("SELECT id, class_name, stream FROM classes ORDER BY class_name, stream");
+while ($row = $res->fetch_assoc()) {
+  $classes[] = [
+    'id' => (int)$row['id'],
+    'label' => trim($row['class_name'] . (!empty($row['stream']) ? ' ' . $row['stream'] : ''))
+  ];
+}
+
+// Fetch teachers
+$teachers = [];
+$res = $conn->query("SELECT id, first_name, last_name FROM teachers ORDER BY first_name, last_name");
+while ($t = $res->fetch_assoc()) {
+  $teachers[] = [
+    'id' => (int)$t['id'],
+    'name' => trim($t['first_name'] . ' ' . $t['last_name'])
+  ];
+}
+?>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Manage Subjects - Admin</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" type="image/png" href="../../favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="../../favicon.svg" />
+  <link rel="shortcut icon" href="../../favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png" />
+  <link rel="manifest" href="../../site.webmanifest" />
+
+  <!-- CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+  <link href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css" rel="stylesheet">
+  <link href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/css/bootstrap-select.min.css" rel="stylesheet">
+  
+  <style>
+  /* Make table responsive */
+  .dataTables_wrapper {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  table.dataTable thead th,
+  table.dataTable tbody td {
+    white-space: nowrap;
+  }
+
+  /* Adjust toolbar section */
+  @media (max-width: 992px) {
+    .d-flex.align-items-center.justify-content-between {
+      flex-direction: column;
+      gap: 10px;
+      text-align: center;
+    }
+    #subjectSearch {
+      width: 100% !important;
+    }
+    #btnAddSubject {
+      width: 100%;
+    }
+  }
+
+  /* Make modal fields stack better on small screens */
+  @media (max-width: 768px) {
+    .modal-dialog {
+      width: 95% !important;
+      margin: auto;
+    }
+    .row.g-3 > div {
+      flex: 0 0 100%;
+      max-width: 100%;
+    }
+  }
+
+  /* Improve select picker responsiveness */
+  .bootstrap-select {
+    width: 100% !important;
+  }
+
+  /* Card spacing adjustments */
+  .card {
+    box-shadow: rgba(0, 0, 0, 0.08) 0px 2px 6px;
+    border-radius: 6px;
+  }
+
+  /* Toast position fix for small screens */
+  @media (max-width: 576px) {
+    #toastContainer {
+      right: 0 !important;
+      left: 0 !important;
+      width: 90%;
+      margin: auto;
+    }
+  }
+</style>
+
+</head>
+<body>
+
+<?php include __DIR__ . '/../partials/header_stub.php'; ?>
+
+<div id="toastContainer" class="position-fixed bottom-0 end-0 p-3" style="z-index:1080;"></div>
+
+<div class="container-fluid py-4">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h3 class="m-0">Subjects Management</h3>
+    <div>
+      <input id="subjectSearch" class="form-control d-inline-block me-2" style="width:260px" placeholder="Search subjects...">
+      <button id="btnAddSubject" class="btn btn-primary"><i class="fa fa-plus"></i> Add Subject</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="table-responsive">
+      <table id="subjectsTable" class="display nowrap table table-striped table-bordered" style="width:100%">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Code</th>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Classes</th>
+            <th>Teachers</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal fade" id="subjectModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <form id="subjectForm" class="modal-content" autocomplete="off">
+      <div class="modal-header">
+        <h5 class="modal-title" id="subjectModalTitle">Add Subject</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="id" id="subject_id">
+        <div id="formAlert"></div>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">Subject Code</label>
+            <input type="text" class="form-control" id="subject_code" name="subject_code" maxlength="30">
+          </div>
+          <div class="col-md-8">
+            <label class="form-label">Subject Name <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="subject_name" name="name" required maxlength="150">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Description</label>
+            <textarea class="form-control" id="subject_description" name="description" rows="2" maxlength="255"></textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Assign Classes</label>
+            <select id="classesSelect" name="classes[]" class="selectpicker form-control" multiple data-live-search="true" data-width="100%">
+              <?php foreach ($classes as $c): ?>
+                <option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['label']) ?></option>
+              <?php endforeach; ?>
+            </select>
+            <small class="text-muted">Choose one or more classes</small>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Assign Teachers</label>
+            <select id="teachersSelectMain" name="teachers[]" class="selectpicker form-control" multiple data-live-search="true" data-width="100%">
+              <?php foreach ($teachers as $t): ?>
+                <option value="<?= $t['id'] ?>"><?= htmlspecialchars($t['name']) ?></option>
+              <?php endforeach; ?>
+            </select>
+            <small class="text-muted">Choose one or more teachers</small>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-success" type="submit">Save</button>
+        <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Assign Teacher Modal -->
+<div class="modal fade" id="assignTeacherModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form id="assignTeacherForm" class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Assign Teacher(s)</h5>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="assignTeacherSubjectId" name="subject_id">
+        <label class="form-label">Select Teacher(s)</label>
+        <select id="teachersSelectAssign" name="teachers[]" class="selectpicker form-control" multiple data-live-search="true" data-width="100%"></select>
+        <small class="text-muted d-block mt-2">Selected teachers will be assigned to all classes linked with this subject.</small>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" type="submit">Assign</button>
+        <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Assign Class Modal -->
+<div class="modal fade" id="assignClassModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form id="assignClassForm" class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Assign Class</h5>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="assignClassSubjectId" name="subject_id">
+        <label class="form-label">Select Class</label>
+        <select id="assignClassSelect" name="class_id" class="form-select" required>
+          <option value="">-- Select Class --</option>
+          <?php foreach ($classes as $c): ?>
+            <option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['label']) ?></option>
+          <?php endforeach; ?>
+        </select>
+        <small class="text-muted d-block mt-2">This class will be linked to all teachers already assigned to this subject.</small>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" type="submit">Assign</button>
+        <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<?php include __DIR__ . '/../partials/footer_stub.php'; ?>
+
+<!-- JS -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/js/bootstrap-select.min.js"></script>
+<script src="subjects.js" data-module="subjects" onload="window.__notifyModuleReady && window.__notifyModuleReady('subjects')"></script>
+</body>
+</html>

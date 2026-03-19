@@ -1,0 +1,8 @@
+{
+    "name": "foase/foase_exam_report_system",
+    "description": "Exam Report System for FOASE",
+    "require": {
+        "mpdf/mpdf": "^8.2",
+        "phpoffice/phpspreadsheet": "^5.1"
+    }
+}

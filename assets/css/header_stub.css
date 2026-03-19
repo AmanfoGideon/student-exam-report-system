@@ -1,0 +1,85 @@
+/* FOASE Exam Report System - Sidebar & Topbar (Deep Blue) */
+
+:root{
+  --deep-blue:#0d47a1;
+  --light-blue:#1565c0;
+  --accent:#2196f3;
+  --white:#ffffff;
+  --text:#0d1b2a;
+  --muted:rgba(255,255,255,0.75);
+  --transition:0.28s ease;
+  --sidebar-w:240px;
+  --sidebar-c:90px;
+}
+
+html[data-theme='dark']{
+  --deep-blue:#0a1a33;
+  --white:#1e2b4a;
+}
+
+/* Base */
+*{box-sizing:border-box}
+body{margin:0;font-family:'Poppins',system-ui,-apple-system,sans-serif;background:#f4f7fb;color:var(--text);transition:background var(--transition),color var(--transition);}
+
+/* Preloader */
+#adminPreloader{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center; background: rgba(255, 255, 255, 0.1); /* semi-transparent */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px); /* for Safari */
+  color: #3e0588ff;
+  transition: opacity .5s ease, visibility .5s ease;
+z-index:9999}
+.loader-box{width:110px;height:110px;background:var(--white);border-radius:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 30px rgba(0,0,0,0.15)}
+.spin-logo{width:72px;height:72px;animation:spin 2s linear infinite}
+.loader-text{margin-top:12px;color:#fff;font-weight:700}
+
+/* Sidebar */
+.sidebar{position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;background:var(--deep-blue);color:#fff;overflow-y:auto;transition:transform var(--transition),width var(--transition);z-index:1040}
+.sidebar.collapsed{width:var(--sidebar-c)}
+.sidebar.active{transform:translateX(0)} /* used for mobile */
+.sidebar-header{padding:22px 12px;border-bottom:1px solid rgba(255,255,255,0.06);text-align:center}
+.school-logo-lg{width:86px;height:auto;display:block;margin:0 auto 10px;animation:float 4s ease-in-out infinite}
+.school-title-lg{font-weight:800;font-size:1rem;letter-spacing:0.04em;color:#fff;text-transform:uppercase}
+.school-subtitle{font-size:0.8rem;color:rgba(255,255,255,0.9);margin-top:6px}
+
+/* Nav */
+.nav-section{padding:8px 14px;font-weight:600;font-size:0.78rem;color:rgba(255,255,255,0.65)}
+.nav-link{display:flex;align-items:center;gap:10px;padding:10px 12px;color:#fff;border-radius:8px;margin:6px 8px;transition:background var(--transition)}
+.nav-link i{width:28px;text-align:center}
+.nav-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-link:hover,.nav-link.active{background:var(--light-blue);box-shadow:0 6px 18px rgba(0,0,0,0.06)}
+.sidebar.collapsed .nav-label{display:none}
+.sidebar.collapsed .nav-link{justify-content:center;padding-left:8px;padding-right:8px}
+.sidebar.collapsed .nav-section{text-align:center;font-size:0.72rem}
+
+/* Overlay */
+.app-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.36);opacity:0;pointer-events:none;transition:opacity var(--transition);z-index:1035}
+.app-overlay.active{opacity:1;pointer-events:auto}
+
+/* Topbar */
+.topbar{position:sticky;top:0;z-index:1030;background:var(--deep-blue);color:#fff;display:flex;justify-content:space-between;align-items:center;padding:8px 16px;box-shadow:0 2px 10px rgba(0,0,0,0.06)}
+.topbar-logo{width:36px;height:36px}
+.topbar-title .title-main{font-weight:800;font-size:14px}
+.topbar-title .title-sub{font-size:12px;color:rgba(255,255,255,0.9)}
+
+/* Profile & avatar */
+.profile-img{width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid #fff}
+
+/* Theme toggle */
+.theme-toggle{display:flex;align-items:center;justify-content:center;width:40px;height:36px;border-radius:8px;color:rgba(255,255,255,0.95);cursor:pointer}
+.theme-toggle:hover{background:rgba(255,255,255,0.03)}
+
+/* Main content shift */
+.main{margin-left:var(--sidebar-w);transition:margin-left var(--transition);min-height:100vh}
+.sidebar.collapsed ~ .main{margin-left:var(--sidebar-c)}
+
+/* Animations */
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+
+/* Responsive: mobile sidebar sliding */
+@media (max-width:992px){
+  .sidebar{transform:translateX(-120%);width:var(--sidebar-w)}
+  .sidebar.active{transform:translateX(0)}
+  .main{margin-left:0}
+  html.sidebar-collapsed .sidebar{transform:translateX(0)}
+}

@@ -1,0 +1,366 @@
+<?php
+// admin/classes/classes.php
+session_start();
+require_once __DIR__ . '/../../includes/db.php';
+
+// Ensure logged in
+if (!isset($_SESSION['user_id'])) {
+  header('Location: ../../auth/login.php');
+  exit;
+}
+
+// Fetch academic years
+$years = [];
+$yrRes = $conn->query("SELECT id, year_label FROM academic_years ORDER BY start_date DESC");
+while ($r = $yrRes->fetch_assoc()) $years[] = $r;
+
+// Teachers (for assign modal)
+$teachers = [];
+$tr = $conn->query("SELECT id, first_name, last_name FROM teachers ORDER BY first_name, last_name");
+while ($t = $tr->fetch_assoc()) {
+  $teachers[] = [
+    'id' => (int)$t['id'],
+    'full_name' => trim($t['first_name'] . ' ' . ($t['last_name'] ?? ''))
+  ];
+}
+
+// Load classes (for promotion destination list)
+$classes_list = [];
+$cr = $conn->query("SELECT id, class_name, stream FROM classes ORDER BY class_name, stream");
+while ($c = $cr->fetch_assoc()) {
+  $classes_list[] = $c;
+}
+?>
+<!doctype html>
+<html lang="en">
+<head>
+  <?php include __DIR__.'/../../pwa-head.php'; ?>
+
+  <meta charset="utf-8">
+  <title>Class Management - Admin</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" type="image/png" href="../../favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="../../favicon.svg" />
+  <link rel="shortcut icon" href="../../favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png" />
+  <link rel="manifest" href="../../site.webmanifest" />
+
+  <!-- CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+
+  <!-- DataTables + Buttons -->
+  <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+  <link href="https://cdn.datatables.net/buttons/2.4.2/css/buttons.bootstrap5.min.css" rel="stylesheet">
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/css/bootstrap-select.min.css" rel="stylesheet">
+  <link href="../../assets/css/admin-dashboard.css" rel="stylesheet">
+  
+
+  <!-- Responsive improvements -->
+  <style>
+    /* filepath: d:\wamp64\www\foase_exam_report_system\admin\classes\classes.php - responsive CSS */
+
+    :root{
+      --brand-blue:#0b3d91;
+      --muted:#6c757d;
+    }
+
+    /* Toolbar / top controls */
+    .card .d-flex.justify-content-between.mb-3,
+    .card .d-flex.justify-content-between.mb-3 > * {
+      align-items: center;
+    }
+    .card .d-flex > input.form-control,
+    .card .d-flex > .btn {
+      margin-bottom: 0.25rem;
+    }
+
+    /* Make toolbar wrap nicely on small screens */
+    @media (max-width: 767.98px) {
+      .card .d-flex.justify-content-between.mb-3 {
+        flex-direction: column;
+        gap: .5rem;
+        align-items: stretch;
+      }
+      .card .d-flex.justify-content-between.mb-3 .form-control {
+        width: 100% !important;
+      }
+      .card .d-flex.justify-content-between.mb-3 .btn {
+        width: 100%;
+      }
+    }
+
+    /* Table tuning */
+    table#classesTable {
+      font-size: 0.95rem;
+      table-layout: auto;
+      word-break: break-word;
+    }
+    .table-responsive { overflow-x: auto; }
+
+    /* Compact controls in table on narrow screens */
+    @media (max-width: 991.98px) {
+      .dt-buttons .btn { padding: .35rem .5rem; font-size: .85rem; }
+      .table td, .table th { white-space: nowrap; }
+    }
+
+    /* Hide less important columns on very small screens */
+    @media (max-width: 575.98px) {
+      /* hide subjects / teachers / students columns to avoid horizontal scroll */
+      th.col-subjects, td.col-subjects,
+      th.col-teachers, td.col-teachers,
+      th.col-students, td.col-students {
+        display: none !important;
+      }
+      /* make actions column more prominent */
+      th:last-child, td:last-child { min-width: 120px; text-align: right; }
+      table#classesTable thead th { font-size: .87rem; }
+      table#classesTable tbody td { font-size: .88rem; padding: .45rem .5rem; }
+    }
+
+    /* Modal behaviour on small screens: use Bootstrap fullscreen utility when available (sm-down) */
+    /* small improvements to form controls in modal */
+    .modal .form-label { font-weight: 600; color: var(--muted); }
+    .modal .modal-body { padding-top: .75rem; }
+
+    /* Preloader position fix (if used) */
+    #contentLoader { pointer-events: none; }
+
+    /* subtle card elevation */
+    .card.shadow-sm { box-shadow: 0 6px 18px rgba(17,24,39,0.06); border-radius: 10px; }
+
+    /* Ensure selectpicker dropdowns are not clipped inside responsive containers */
+    .bootstrap-select .dropdown-menu { z-index: 4000; }
+
+    /* accessibility: ensure focus outlines visible when keyboard navigating */
+    :focus { outline: 3px solid rgba(11,61,145,0.18); outline-offset: 2px; }
+
+  </style>
+</head>
+<body>
+<?php include __DIR__ . '/../partials/header_stub.php'; ?>
+
+
+
+<div class="container-fluid py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="m-0"><i class="fa fa-chalkboard"></i> Class Management</h3>
+    
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="d-flex justify-content-between mb-3">
+        <input id="classSearch" class="form-control me-2" style="width:260px" placeholder="Search classes...">
+        <button id="btnAddClass" class="btn btn-primary"><i class="fa fa-plus"></i> Add Class</button>
+      </div>
+
+      <div class="table-responsive">
+        <table id="classesTable" class="table table-striped table-bordered align-middle" style="width:100%">
+          <thead class="table-light">
+            <tr>
+              <th>#</th>
+              <th>Class</th>
+              <th>Stream</th>
+              <th>Year</th>
+              <th class="col-subjects">Subjects</th>
+              <th class="col-teachers">Teachers</th>
+              <th class="col-students">Students</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toastContainer" class="position-fixed bottom-0 end-0 p-3"></div>
+
+<!-- Add/Edit Class Modal -->
+<div class="modal fade" id="classModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down"> <!-- changed for responsiveness -->
+    <form id="classForm" class="modal-content" autocomplete="off">
+      <div class="modal-header">
+        <h5 class="modal-title" id="classModalTitle">Add Class</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="id" id="class_id">
+        <div id="classFormAlert"></div>
+        <div class="mb-3">
+          <label class="form-label">Class Name *</label>
+          <input class="form-control" name="class_name" id="class_name" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Stream</label>
+          <input class="form-control" name="stream" id="class_stream">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Academic Year</label>
+          <select class="form-control" name="year_id" id="class_year" required>
+            <option value="">-- Select Year --</option>
+            <?php foreach ($years as $y): ?>
+              <option value="<?= (int)$y['id'] ?>"><?= htmlspecialchars($y['year_label']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-success" type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Assign Subject Modal -->
+<div class="modal fade" id="assignSubjectModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-fullscreen-sm-down modal-dialog-centered modal-dialog-scrollable"> <!-- changed -->
+    <form id="assignSubjectForm" class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Assign Subject to Class</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="assignSubjectClassId" name="class_id">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Select Subject</label>
+            <select id="assignSubjectSelect" name="subject_id" class="form-control" required>
+              <option value="">-- Select Subject --</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Select Teacher(s)</label>
+            <select id="assignSubjectTeachers" name="teachers[]" class="selectpicker form-control" multiple data-live-search="true" data-width="100%">
+              <?php foreach ($teachers as $t): ?>
+                <option value="<?= $t['id'] ?>"><?= htmlspecialchars($t['full_name']) ?></option>
+              <?php endforeach; ?>
+            </select>
+            <small class="text-muted">Multiple teachers can teach the subject for this class.</small>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" type="submit">Assign</button>
+        <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Assign Students Modal -->
+<div class="modal fade" id="assignStudentsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-fullscreen-sm-down modal-dialog-centered modal-dialog-scrollable"> <!-- changed -->
+    <form id="assignStudentsForm" class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Assign Students to Class</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="assignStudentsClassId" name="class_id">
+        <label class="form-label">Select Students</label>
+        <select id="assignStudentsSelect" name="students[]" class="selectpicker form-control" multiple data-live-search="true" data-width="100%">
+          <?php
+            // We'll lazy-load students list in JS if the list is large; keep this initial list minimal
+            $stuQ = $conn->query("SELECT id, admission_no, first_name, last_name FROM students ORDER BY first_name LIMIT 200");
+            while ($st = $stuQ->fetch_assoc()):
+          ?>
+            <option value="<?= $st['id'] ?>"><?= htmlspecialchars(($st['admission_no'] ? $st['admission_no'] . ' — ' : '') . trim($st['first_name'].' '.$st['last_name'])) ?></option>
+          <?php endwhile; ?>
+        </select>
+        <small class="text-muted d-block mt-2">Selected students will be assigned to this class.</small>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" type="submit">Assign Students</button>
+        <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Promote / Transfer Modal -->
+<div class="modal fade" id="promoteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-fullscreen-sm-down modal-dialog-centered modal-dialog-scrollable"> <!-- changed -->
+    <form id="promoteForm" class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Promote / Transfer Students</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="promoteFromClassId" name="from_class_id">
+        <div class="mb-2">
+          <strong>From:</strong> <span id="promoteFromClassName"></span>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Promote / Transfer To (Destination Class)</label>
+            <select id="promoteToClassId" name="to_class_id" class="form-control" required>
+              <option value="">-- Select destination class --</option>
+              <?php foreach ($classes_list as $c): ?>
+                <option value="<?= (int)$c['id'] ?>"><?= htmlspecialchars($c['class_name'] . (!empty($c['stream']) ? ' ' . $c['stream'] : '')) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Promotion Type</label>
+            <select id="promotionType" name="promotion_type" class="form-control">
+              <option value="promotion">Promotion (move up)</option>
+              <option value="transfer">Transfer (manual)</option>
+            </select>
+          </div>
+
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" value="1" id="promoteAll" name="promote_all" checked>
+              <label class="form-check-label" for="promoteAll">Promote all students in this class</label>
+            </div>
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Or select specific students (overrides Promote all)</label>
+            <select id="promoteStudentsSelect" name="student_ids[]" class="selectpicker form-control" multiple data-live-search="true" data-width="100%"></select>
+            <small class="text-muted d-block mt-1">If you pick students here, only selected students will be promoted/transferred.</small>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-success" type="submit">Proceed</button>
+        <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<?php include __DIR__ . '/../partials/footer_stub.php'; ?>
+
+<!-- JS libs -->
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- DataTables -->
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+
+<!-- DataTables Buttons -->
+<script src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.bootstrap5.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.print.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/js/bootstrap-select.min.js"></script>
+
+<!-- Module JS -->
+<script src="classes.js"></script>
+
+
+<?php include __DIR__.'/../../pwa-footer.php'; ?>\n</body>
+</html>

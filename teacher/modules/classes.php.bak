@@ -1,0 +1,152 @@
+<?php
+// teacher/classes.php — teacher's assigned classes/subjects using subject_teachers + subject_classes (simple navigation links)
+session_start();
+require_once __DIR__ . '/../../includes/db.php';
+
+// Auth check
+if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'Teacher') {
+    header('Location: ../auth/login.php?error=Please+login+as+Teacher');
+    exit;
+}
+$user_id = (int)$_SESSION['user_id'];
+
+// Get teacher details
+$teacher = null;
+if ($stmt = $conn->prepare("SELECT id, first_name, last_name, username FROM teachers WHERE user_id = ? LIMIT 1")) {
+    $stmt->bind_param('i', $user_id);
+    $stmt->execute();
+    $teacher = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+}
+$teacherId = (int)($teacher['id'] ?? $user_id);
+$teacherName = trim(($teacher['first_name'] ?? '') . ' ' . ($teacher['last_name'] ?? '')) ?: 'Teacher';
+
+// Fetch assigned subjects/classes
+$sql = "SELECT 
+            c.id AS class_id,
+            c.class_name,
+            s.id AS subject_id,
+            s.name AS subject_name
+        FROM subject_teachers st
+        INNER JOIN subject_classes sc ON st.subject_id = sc.subject_id
+        INNER JOIN classes c ON sc.class_id = c.id
+        INNER JOIN subjects s ON st.subject_id = s.id
+        WHERE st.teacher_id = ?
+        ORDER BY c.class_name, s.name";
+$stmt = $conn->prepare($sql);
+$stmt->bind_param('i', $teacherId);
+$stmt->execute();
+$res = $stmt->get_result();
+$assignments = $res->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+
+// Get student counts per class
+$classCounts = [];
+if (!empty($assignments)) {
+    $classIds = array_column($assignments, 'class_id');
+    $in = implode(',', array_map('intval', array_unique($classIds)));
+    $countRes = $conn->query("SELECT class_id, COUNT(*) AS total FROM students WHERE class_id IN ($in) GROUP BY class_id");
+    while ($row = $countRes->fetch_assoc()) {
+        $classCounts[$row['class_id']] = $row['total'];
+    }
+}
+?>
+
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>My Classes | <?= htmlspecialchars($teacherName) ?></title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="../../favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="../../favicon.svg" />
+  <link rel="shortcut icon" href="../../favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png" />
+  <link rel="manifest" href="../../site.webmanifest" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+<style>
+:root { --deep:#0d47a1; --deep2:#1565c0; }
+body { background:#f5f7fb; }
+.page-header {
+  display:flex; justify-content:space-between; align-items:center;
+  background:#fff; padding:1rem 1.5rem; margin-bottom:1rem;
+  border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,0.05);
+}
+.class-card {
+  border-left:5px solid var(--deep); border-radius:10px;
+  transition:transform .2s; background:#fff; box-shadow:0 2px 6px rgba(0,0,0,.05);
+}
+.class-card:hover { transform:translateY(-2px); box-shadow:0 4px 10px rgba(0,0,0,.1); }
+.subject-badge {
+  background:var(--deep2); color:#fff; padding:.35rem .65rem;
+  border-radius:6px; font-size:.85rem;
+}
+.student-count { font-size:.9rem; color:#555; margin-bottom:.5rem; }
+</style>
+</head>
+<body>
+
+<?php include __DIR__ . '/../../admin/partials/header_stub.php'; ?>
+
+<div class="container-fluid p-4">
+
+  <div class="page-header">
+    <div>
+      <h4 class="mb-0">My Assigned Classes</h4>
+      <small class="text-muted"><?= htmlspecialchars($teacherName) ?></small>
+    </div>
+    <a href="dashboard.php" class="btn btn-outline-primary btn-sm">
+      <i class="fa fa-arrow-left me-1"></i> Back to Dashboard
+    </a>
+  </div>
+
+  <?php if (empty($assignments)): ?>
+
+
+<div class="alert alert-info">No assigned classes or subjects found.</div>
+
+  <?php else: ?>
+
+
+<div class="row g-3">
+  <?php foreach ($assignments as $a): 
+    $cid = (int)$a['class_id'];
+    $sid = (int)$a['subject_id'];
+    $count = $classCounts[$cid] ?? 0;
+  ?>
+    <div class="col-sm-6 col-lg-4">
+      <div class="card class-card p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h5 class="mb-0"><?= htmlspecialchars($a['class_name']) ?></h5>
+          <span class="subject-badge"><?= htmlspecialchars($a['subject_name']) ?></span>
+        </div>
+        <div class="student-count">
+          <i class="fa fa-users me-1"></i> <?= $count ?> student<?= $count == 1 ? '' : 's' ?>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <a href="enter_scores.php?class_id=<?= $cid ?>&subject_id=<?= $sid ?>" class="btn btn-sm btn-outline-primary">
+            <i class="fa fa-pen"></i> Enter Marks
+          </a>
+          <a href="view_students.php?class_id=<?= $cid ?>" class="btn btn-sm btn-outline-secondary">
+            <i class="fa fa-user-graduate"></i> View Students
+          </a>
+          <a href="reports.php?class_id=<?= $cid ?>&subject_id=<?= $sid ?>" class="btn btn-sm btn-outline-success">
+            <i class="fa fa-file-alt"></i> Reports
+          </a>
+        </div>
+      </div>
+    </div>
+  <?php endforeach; ?>
+</div>
+
+
+  <?php endif; ?>
+
+</div>
+
+<?php include __DIR__ . '/../../admin/partials/footer_stub.php'; ?>
+
+</body>
+</html>

@@ -1,0 +1,254 @@
+<?php
+// admin/teachers/teachers.php
+session_start();
+require_once __DIR__ . '/../../includes/db.php';
+
+if (!isset($_SESSION['user_id'])) {
+    header('Location: ../../auth/login.php');
+    exit;
+}
+
+// Fetch subjects
+$subjectsRes = $conn->query("SELECT id, name, subject_code FROM subjects ORDER BY name");
+$subjects = $subjectsRes ? $subjectsRes->fetch_all(MYSQLI_ASSOC) : [];
+
+// Fetch classes
+$classesRes = $conn->query("SELECT id, class_name, stream FROM classes ORDER BY class_name, stream");
+$classes = $classesRes ? $classesRes->fetch_all(MYSQLI_ASSOC) : [];
+?>
+<!doctype html>
+<html lang="en">
+<head>
+  <?php include __DIR__.'/../../pwa-head.php'; ?>
+
+<meta charset="utf-8">
+<title>Teachers - Admin</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/png" href="../../favicon-96x96.png" sizes="96x96" />
+<link rel="icon" type="image/svg+xml" href="../../favicon.svg" />
+<link rel="shortcut icon" href="../../favicon.ico" />
+<link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png" />
+<link rel="manifest" href="../../site.webmanifest" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+<link href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css" rel="stylesheet">
+<link href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css" rel="stylesheet">
+<link href="https://cdn.datatables.net/responsive/2.5.0/css/responsive.dataTables.min.css" rel="stylesheet">
+
+<style>
+
+
+/* Responsive Enhancements */
+@media (max-width: 992px) {
+  .d-flex.justify-content-between.align-items-center {
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+  }
+  #teacherSearch {
+    width: 100% !important;
+    margin-bottom: 10px;
+  }
+  #btnAddTeacher {
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .container-fluid {
+    padding: 10px;
+  }
+  table.dataTable {
+    width: 100% !important;
+  }
+  .dataTables_wrapper .dataTables_filter {
+    float: none;
+    text-align: left;
+  }
+}
+
+@media (max-width: 576px) {
+  .modal-dialog {
+    width: 95% !important;
+    margin: auto;
+  }
+  .modal-body .form-control {
+    font-size: 0.9rem;
+  }
+  .modal-title {
+    font-size: 1rem;
+  }
+  #teachersTable {
+    font-size: 0.85rem;
+  }
+  td, th {
+    white-space: nowrap;
+  }
+}
+
+/* Table Scroll Fix */
+.dataTables_wrapper {
+  overflow-x: auto;
+}
+
+/* Buttons spacing */
+button, input, select {
+  border-radius: 4px !important;
+}
+
+.card {
+  border-radius: 6px;
+}
+
+/* Mobile Friendly Select Inputs */
+select[multiple] {
+  height: auto !important;
+}
+
+
+/* Fix DataTables responsive icon on mobile */
+table.dataTable.dtr-inline.collapsed>tbody>tr>td:first-child:before,
+table.dataTable.dtr-inline.collapsed>tbody>tr>th:first-child:before {
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+</style>
+
+</head>
+<body>
+<?php include __DIR__ . '/../partials/header_stub.php'; ?>
+
+<div id="pageLoader" aria-hidden="true">
+  <div class="text-center">
+    <div class="spinner-border text-light mb-3" role="status"><span class="visually-hidden">Loading...</span></div>
+    <div class="fw-semibold text-white-50">Loading, please wait...</div>
+  </div>
+</div>
+
+<div class="position-fixed top-0 end-0 p-3" style="z-index:6000">
+  <div id="toastContainer"></div>
+</div>
+
+<div class="container-fluid py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="m-0">Teacher Management</h3>
+    <div>
+      <input id="teacherSearch" class="form-control d-inline-block me-2" style="width:260px" placeholder="Search teachers...">
+      <button id="btnAddTeacher" class="btn btn-primary"><i class="fa fa-plus"></i> Add Teacher</button>
+    </div>
+  </div>
+
+  <div class="card shadow-sm border-0">
+    <div class="card-body">
+      <table id="teachersTable" class="display nowrap" style="width:100%">
+        <thead class="table-light">
+          <tr>
+            <th>#</th>
+            <th>Full Name</th>
+            <th>Username</th>
+            <th>Email</th>
+            <th>Phone</th>
+            <th>Subjects</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Teacher Modal -->
+<div class="modal fade" id="teacherModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form id="teacherForm" class="modal-content" autocomplete="off">
+      <div class="modal-header">
+        <h5 class="modal-title" id="teacherModalTitle">Add Teacher</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="teacher_id" id="teacher_id">
+        <div class="mb-3">
+          <label class="form-label">First Name *</label>
+          <input class="form-control" name="first_name" id="first_name" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Last Name</label>
+          <input class="form-control" name="last_name" id="last_name">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Username *</label>
+          <input class="form-control" name="username" id="username" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Email</label>
+          <input class="form-control" type="email" name="email" id="email">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Phone</label>
+          <input class="form-control" name="phone" id="phone">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Password *</label>
+          <input class="form-control" type="password" name="password" id="password">
+          <small class="text-muted">Leave empty to keep current password.</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-success" type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Assign Subjects & Classes Modal -->
+<div class="modal fade" id="assignModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <form id="assignForm" class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Assign Subjects & Classes</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="teacher_id" id="assign_teacher_id">
+        <div class="mb-3">
+          <label class="form-label">Subjects</label>
+          <select name="subjects[]" id="assign_subjects" class="form-control" multiple>
+            <?php foreach ($subjects as $s): ?>
+              <option value="<?= (int)$s['id'] ?>"><?= htmlspecialchars($s['name'].' ('.$s['id'].')') ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Classes</label>
+          <select name="classes[]" id="assign_classes" class="form-control" multiple>
+            <?php foreach ($classes as $c): ?>
+              <option value="<?= (int)$c['id'] ?>"><?= htmlspecialchars($c['class_name'].' '.$c['stream']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" type="submit">Save Assignments</button>
+        <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<?php include __DIR__ . '/../partials/footer_stub.php'; ?>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+<script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
+<script src="https://cdn.datatables.net/responsive/2.5.0/js/dataTables.responsive.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
+<script src="teachers.js" data-module="teachers" onload="window.__notifyModuleReady && window.__notifyModuleReady('teachers')"></script>
+
+<?php include __DIR__.'/../../pwa-footer.php'; ?>\n</body>
+</html>

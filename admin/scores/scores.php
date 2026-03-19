@@ -1,0 +1,256 @@
+
+<?php
+// admin/scores/scores.php
+session_start();
+require_once __DIR__ . '/../../includes/db.php';
+
+if (!isset($_SESSION['user_id'])) {
+    header('Location: ../../login.php');
+    exit;
+}
+
+// create CSRF token (simple)
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrf_token = $_SESSION['csrf_token'];
+?>
+<!doctype html>
+<html lang="en">
+<head>
+  <?php include __DIR__.'/../../pwa-head.php'; ?>
+
+  <meta charset="utf-8">
+  <title>Scores Management — FOASE JHS</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" type="image/png" href="../../favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="../../favicon.svg" />
+  <link rel="shortcut icon" href="../../favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png" />
+  <link rel="manifest" href="../../site.webmanifest" />
+  <!-- Bootstrap 5 (CDN or local) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css" rel="stylesheet">
+  <link href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css" rel="stylesheet">
+  <link href="../../assets/css/admin-dashboard.css" rel="stylesheet"> <!-- Added admin-dashboard.css -->
+
+  <style>
+    :root {
+      --card-radius: 12px;
+      --gutter: 1rem;
+    }
+    body { background: #f4f6f8; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+    .container-fluid { max-width: 1200px; margin-top: 20px; }
+    .card { border-radius: var(--card-radius); }
+    .toast-container { position: fixed; top: 1rem; right: 1rem; z-index: 1080; }
+    .table-responsive { margin-top: .75rem; }
+    .small-muted { font-size: .85rem; color: #6c757d; }
+  </style>
+</head>
+<body>
+    <?php include __DIR__ . '/../partials/header_stub.php'; ?>
+  <div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h4 class="m-0">Scores Management</h4>
+      <div class="small-muted">Welcome — <?= htmlspecialchars($_SESSION['first_name'] ?? ($_SESSION['username'] ?? 'User')) ?></div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-4 p-3">
+      <div class="row g-3 align-items-end">
+        <input type="hidden" id="csrf_token" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
+
+        <div class="col-md-3">
+          <label class="form-label">Class</label>
+          <select id="class_id" class="form-select">
+            <option value="">-- Select Class --</option>
+            <?php
+              $rs = $conn->query("SELECT id, class_name FROM classes ORDER BY class_name");
+              while ($r = $rs->fetch_assoc()) {
+                  echo '<option value="'.(int)$r['id'].'">'.htmlspecialchars($r['class_name']).'</option>';
+              }
+            ?>
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label">Subject</label>
+          <select id="subject_id" class="form-select">
+            <option value="">-- Select Subject --</option>
+            <?php
+              $rs = $conn->query("SELECT id, name FROM subjects ORDER BY name");
+              while ($r = $rs->fetch_assoc()) {
+                  echo '<option value="'.(int)$r['id'].'">'.htmlspecialchars($r['name']).'</option>';
+              }
+            ?>
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label">Academic Year</label>
+          <select id="year_id" class="form-select">
+            <option value="">-- Select Year --</option>
+            <?php
+              $rs = $conn->query("SELECT id, year_label FROM academic_years ORDER BY year_label DESC");
+              while ($r = $rs->fetch_assoc()) {
+                  echo '<option value="'.(int)$r['id'].'">'.htmlspecialchars($r['year_label']).'</option>';
+              }
+            ?>
+          </select>
+        </div>
+
+        <div class="col-md-3">
+          <label class="form-label">Term</label>
+          <select id="term_id" class="form-select">
+            <option value="">-- Select Term --</option>
+            <?php
+              $rs = $conn->query("SELECT id, term_name FROM terms ORDER BY position ASC");
+              while ($r = $rs->fetch_assoc()) {
+                  echo '<option value="'.(int)$r['id'].'">'.htmlspecialchars($r['term_name']).'</option>';
+              }
+            ?>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bulk entry (hidden until filters set) -->
+    <div id="scoresEntrySection" class="card mb-4" style="display:none;">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h5 class="mb-0">Bulk Score Entry</h5>
+          <div id="bulkSpinner" class="spinner-border spinner-border-sm text-primary d-none" role="status" aria-hidden="true"></div>
+        </div>
+
+        <form id="bulkScoresForm" autocomplete="off">
+          <div class="table-responsive">
+            <table id="scoresEntryTable" class="table table-sm table-bordered align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>Student</th>
+                  <th style="width:160px">Class Score<br><small class="text-muted">max 50</small></th>
+                  <th style="width:160px">Exam Score<br><small class="text-muted">max 50</small></th>
+                  <th style="width:100px">Total</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="text-end mt-2">
+            <button id="saveBulkBtn" type="submit" class="btn btn-success">
+              <i class="bi bi-save me-1"></i> Save & Recalculate Positions
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Saved scores -->
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5 class="mb-0">Saved Scores</h5>
+          <div class="d-flex gap-2">
+            <button id="exportScoresBtn" class="btn btn-outline-success btn-sm">Export Scores</button>
+            <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importScoresModal">Import (CSV)</button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table id="scoresTable" class="table table-striped table-bordered w-100">
+            <thead class="table-light">
+              <tr>
+                <th>Student</th><th>Class</th><th>Subject</th><th>Term</th><th>Year</th>
+                <th>Class Score</th><th>Exam Score</th><th>Total</th><th>Grade</th><th>Remark</th><th>Action</th>
+              </tr>
+            </thead>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit modal -->
+  <div class="modal fade" id="editScoreModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <form id="editScoreForm" class="modal-content" autocomplete="off">
+        <div class="modal-header bg-primary text-white">
+          <h5 class="modal-title">Edit Score</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="edit_score_id" name="id">
+          <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
+
+          <div class="mb-3">
+            <label class="form-label">Class Score (0–50)</label>
+            <input id="edit_class_score" name="class_score" type="number" min="0" max="50" class="form-control" required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Exam Score (0–50)</label>
+            <input id="edit_exam_score" name="exam_score" type="number" min="0" max="50" class="form-control" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-primary" type="submit">Update</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Import Modal -->
+  <div class="modal fade" id="importScoresModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <form id="importScoresForm" class="modal-content" enctype="multipart/form-data" autocomplete="off">
+        <div class="modal-header bg-secondary text-white">
+          <h5 class="modal-title">Import Scores (CSV)</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
+
+          <div class="mb-3">
+            <label class="form-label">CSV file</label>
+            <input type="file" name="scores_file" class="form-control" accept=".csv" required>
+            <div class="form-text">Columns: student_id,subject_id,class_score,exam_score,term_id,year_id</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-light" type="button" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-secondary" type="submit">Import</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast container (top-right) -->
+  <div class="toast-container" id="toastPlacement">
+    <div id="liveToast" class="toast align-items-center border-0" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="d-flex">
+        <div class="toast-body" id="toast-body"></div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" defer></script>
+  <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js" defer></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js" defer></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js" defer></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js" defer></script>
+
+  <!-- Module JS -->
+  <script src="scores.js" defer></script>
+  <?php include __DIR__ . '/../partials/footer_stub.php'; ?>
+
+<?php include __DIR__.'/../../pwa-footer.php'; ?>\n</body>
+</html>
+

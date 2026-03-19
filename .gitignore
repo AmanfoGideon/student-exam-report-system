@@ -1,0 +1,17 @@
+.env
+.env.*
+vendor/
+node_modules/
+storage/
+cache/
+logs/
+tmp/
+dist/
+build/
+uploads/
+*.log
+*.sql
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

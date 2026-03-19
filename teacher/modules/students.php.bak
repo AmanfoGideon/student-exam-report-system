@@ -1,0 +1,205 @@
+<?php
+// teacher/students.php — Unified table view with class dropdown filter, live search, and sort
+session_start();
+require_once __DIR__ . '/../../includes/db.php';
+
+// Auth check
+if (!isset($_SESSION['user_id']) || ($_SESSION['role'] ?? '') !== 'Teacher') {
+    header('Location: ../../auth/login.php?error=Please+login+as+Teacher');
+    exit;
+}
+
+$user_id = (int)$_SESSION['user_id'];
+
+// Fetch teacher record
+$teacher = null;
+if ($stmt = $conn->prepare("SELECT id, first_name, last_name FROM teachers WHERE user_id = ? LIMIT 1")) {
+    $stmt->bind_param('i', $user_id);
+    $stmt->execute();
+    $teacher = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+}
+$teacherId = (int)($teacher['id'] ?? $user_id);
+$teacherName = trim(($teacher['first_name'] ?? '') . ' ' . ($teacher['last_name'] ?? '')) ?: 'Teacher';
+
+// Get all classes assigned to this teacher
+$sql = "SELECT DISTINCT c.id AS class_id, c.class_name
+        FROM subject_teachers st
+        JOIN subject_classes sc ON st.subject_id = sc.subject_id
+        JOIN classes c ON c.id = sc.class_id
+        WHERE st.teacher_id = ?
+        ORDER BY c.class_name ASC";
+$stmt = $conn->prepare($sql);
+$stmt->bind_param('i', $teacherId);
+$stmt->execute();
+$classes = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+
+// Fetch all students for those classes
+$classIds = array_column($classes, 'class_id');
+$students = [];
+if ($classIds) {
+    $in = implode(',', array_map('intval', $classIds));
+    $q = "
+        SELECT s.id, s.first_name, s.last_name, s.gender, s.admission_no, c.class_name, c.id AS class_id
+        FROM students s
+        JOIN classes c ON c.id = s.class_id
+        WHERE s.class_id IN ($in)
+        ORDER BY c.class_name, s.first_name, s.last_name
+    ";
+    $res = $conn->query($q);
+    $students = $res->fetch_all(MYSQLI_ASSOC);
+}
+?>
+
+<!doctype html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>My Students | <?= htmlspecialchars($teacherName) ?></title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="../../favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="../../favicon.svg" />
+  <link rel="shortcut icon" href="../../favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png" />
+  <link rel="manifest" href="../../site.webmanifest" />
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+<link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+<style>
+:root { --deep:#0d47a1; --deep2:#1565c0; }
+body { background:#f5f7fb; }
+.page-header {
+  display:flex; justify-content:space-between; align-items:center;
+  background:#fff; padding:1rem 1.5rem; margin-bottom:1rem;
+  border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,0.05);
+}
+.filter-bar {
+  display:flex; flex-wrap:wrap; align-items:center; gap:.5rem;
+  margin-bottom:1rem;
+}
+.table thead th { background:var(--deep2); color:#fff; }
+</style>
+</head>
+<body>
+
+<?php include __DIR__ . '/../../admin/partials/header_stub.php'; ?>
+
+<div class="container-fluid p-4">
+
+  <div class="page-header">
+    <div>
+      <h4 class="mb-0">All My Students</h4>
+      <small class="text-muted">Taught by <?= htmlspecialchars($teacherName) ?></small>
+    </div>
+    <a href="dashboard.php" class="btn btn-outline-primary btn-sm">
+      <i class="fa fa-arrow-left me-1"></i> Back to Dashboard
+    </a>
+  </div>
+
+  <?php if (empty($students)): ?>
+
+
+<div class="alert alert-info">No students found for your assigned classes.</div>
+
+
+  <?php else: ?>
+
+  <div class="card">
+    <div class="card-body">
+      <div class="filter-bar">
+        <div class="input-group" style="max-width:300px;">
+          <span class="input-group-text bg-light"><i class="fa fa-filter text-primary"></i></span>
+          <select id="classFilter" class="form-select">
+            <option value="">All Classes</option>
+            <?php foreach ($classes as $c): ?>
+              <option value="<?= $c['class_name'] ?>"><?= htmlspecialchars($c['class_name']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+
+
+    <div class="input-group" style="max-width:300px;">
+      <span class="input-group-text bg-light"><i class="fa fa-search text-primary"></i></span>
+      <input id="studentSearch" type="text" class="form-control" placeholder="Search students...">
+    </div>
+
+    <div class="ms-auto">
+      <button class="btn btn-outline-secondary btn-sm sort-btn" data-sort="asc"><i class="fa fa-sort-alpha-down"></i> Sort A–Z</button>
+      <button class="btn btn-outline-secondary btn-sm sort-btn" data-sort="desc"><i class="fa fa-sort-alpha-up"></i> Sort Z–A</button>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table id="studentsTable" class="table table-striped table-bordered align-middle">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Full Name</th>
+          <th>Gender</th>
+          <th>Admission No.</th>
+          <th>Class</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php $i=1; foreach ($students as $s): ?>
+          <tr data-class="<?= htmlspecialchars($s['class_name']) ?>">
+            <td><?= $i++ ?></td>
+            <td><?= htmlspecialchars($s['first_name'].' '.$s['last_name']) ?></td>
+            <td><?= htmlspecialchars($s['gender']) ?></td>
+            <td><?= htmlspecialchars($s['admission_no']) ?></td>
+            <td><?= htmlspecialchars($s['class_name']) ?></td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+  </div>
+  <?php endif; ?>
+</div>
+
+<?php include __DIR__ . '/../../admin/partials/footer_stub.php'; ?>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+$(function(){
+  const $rows = $('#studentsTable tbody tr');
+
+  // Filter by class
+  $('#classFilter').on('change', function(){
+    const val = $(this).val().toLowerCase();
+    $rows.show().filter(function(){
+      return val && $(this).data('class').toLowerCase() !== val;
+    }).hide();
+  });
+
+  // Search filter
+  $('#studentSearch').on('keyup', function(){
+    const val = $(this).val().toLowerCase();
+    $rows.show().filter(function(){
+      return !$(this).text().toLowerCase().includes(val);
+    }).hide();
+  });
+
+  // Sort buttons
+  $('.sort-btn').on('click', function(){
+    const order = $(this).data('sort');
+    const sorted = $rows.sort((a,b)=>{
+      const nameA = $(a).find('td:nth-child(2)').text().toLowerCase();
+      const nameB = $(b).find('td:nth-child(2)').text().toLowerCase();
+      return order === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+    });
+    $('#studentsTable tbody').html(sorted);
+  });
+});
+</script>
+
+
+</body>
+</html>
